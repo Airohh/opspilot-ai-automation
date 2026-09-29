@@ -131,6 +131,10 @@ class NotionLinkIn(BaseModel):
     request_id: str = Field(min_length=1)
 
 
+class SupplierMatchIn(BaseModel):
+    text: str = Field(min_length=1)
+
+
 def create_app(
     *,
     database_url: str | None = None,
@@ -213,6 +217,26 @@ def create_app(
             "demonstration_data": True,
             "results": request.app.state.suppliers.search(q),
         }
+
+    @app.post("/suppliers/match")
+    def match_supplier(
+        body: SupplierMatchIn,
+        request: Request,
+        _: None = Depends(require_token),
+    ) -> dict:
+        matches = request.app.state.suppliers.match(body.text)
+        if not matches:
+            raise HTTPException(
+                status_code=404,
+                detail="No known supplier is named in the request. Ask the requester which one.",
+            )
+        if len(matches) > 1:
+            names = ", ".join(item["id"] for item in matches)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Several suppliers are named ({names}). Ask the requester which one.",
+            )
+        return {"demonstration_data": True, **matches[0]}
 
     @app.get("/knowledge/search")
     def search_knowledge(

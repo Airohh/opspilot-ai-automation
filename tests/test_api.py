@@ -87,6 +87,28 @@ def test_supplier_search_is_case_insensitive(client: TestClient):
     assert response.json()["results"][0]["id"] == "ACME"
 
 
+def test_supplier_is_matched_from_the_request_text(client: TestClient):
+    request = "Analyse la demande du fournisseur ACME. Ils demandent 90 jours au lieu de 60."
+    response = client.post("/suppliers/match", json={"text": request})
+    assert response.status_code == 200
+    assert response.json()["id"] == "ACME"
+    by_name = client.post("/suppliers/match", json={"text": "Nordic Steel asks for 60 days"})
+    assert by_name.json()["id"] == "NORDIC"
+
+
+def test_unknown_supplier_is_not_replaced_by_another_one(client: TestClient):
+    unknown = client.post("/suppliers/match", json={"text": "Globex veut 90 jours"})
+    assert unknown.status_code == 404
+    partial_word = client.post("/suppliers/match", json={"text": "ACMEX veut 90 jours"})
+    assert partial_word.status_code == 404
+
+
+def test_two_named_suppliers_are_ambiguous(client: TestClient):
+    response = client.post("/suppliers/match", json={"text": "ACME et HELIX demandent 90 jours"})
+    assert response.status_code == 409
+    assert "ACME" in response.json()["detail"]
+
+
 def test_policy_search_marks_documents_untrusted(client: TestClient):
     response = client.get("/knowledge/search", params={"q": "payment terms"})
     assert response.status_code == 200

@@ -17,7 +17,11 @@ from sqlalchemy import (
     select,
     text,
 )
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+
+UPSERT_INSERTS = {"postgresql": postgresql_insert, "sqlite": sqlite_insert}
 
 
 def utcnow() -> datetime:
@@ -147,24 +151,27 @@ def _ensure_fallback_column(engine) -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
-                "ALTER TABLE operation_requests ADD COLUMN fallback_used BOOLEAN NOT NULL DEFAULT 0"
+                "ALTER TABLE operation_requests "
+                "ADD COLUMN fallback_used BOOLEAN NOT NULL DEFAULT FALSE"
             )
         )
 
 
 def next_request_id(session: Session, now: datetime | None = None) -> str:
+    """Increment the yearly counter in one upsert, so two intakes cannot read the same value."""
     moment = now or utcnow()
-    query = select(RequestCounter).where(RequestCounter.year == moment.year)
-    if session.get_bind().dialect.name != "sqlite":
-        query = query.with_for_update()
-    counter = session.scalars(query).one_or_none()
-    if counter is None:
-        counter = RequestCounter(year=moment.year, last_value=1)
-        session.add(counter)
-    else:
-        counter.last_value += 1
-    session.flush()
-    return f"REQ-{moment.year}-{counter.last_value:03d}"
+    insert = UPSERT_INSERTS[session.get_bind().dialect.name]
+    statement = (
+        insert(RequestCounter)
+        .values(year=moment.year, last_value=1)
+        .on_conflict_do_update(
+            index_elements=[RequestCounter.year],
+            set_={"last_value": RequestCounter.last_value + 1},
+        )
+        .returning(RequestCounter.last_value)
+    )
+    value = session.execute(statement).scalar_one()
+    return f"REQ-{moment.year}-{value:03d}"
 
 
 def add_event(session: Session, request: OperationRequest, event_type: str, **fields) -> AuditEvent:

@@ -10,7 +10,8 @@ OpsPilot is a controlled operations workflow. n8n decides the order of steps. Th
 | FastAPI `POST /operations/intake` | Assigns `REQ-YYYY-NNN`, stores the request, appends an audit event. |
 | FastAPI Notion adapter | Creates and updates one page in AI Automation Lab. |
 | n8n AI Agent | Chooses among three read tools and returns a structured proposal. |
-| n8n Wait node | Stops the execution until a human posts approve or reject. |
+| FastAPI `POST /suppliers/match` | Finds the one supplier named in the request. 404 if none, 409 if several. |
+| n8n Wait node | Stops the execution until a human posts approve or reject with the approver token. Rejects after 24 hours without a decision. |
 | FastAPI `POST /operations/{id}/resolve` | Applies Completed or Rejected. Refuses the call if the request is not waiting. |
 | Postgres, or SQLite in tests | Current request state plus append-only `audit_events`. |
 | `GET /kpi` | Counts from stored requests. |
@@ -69,6 +70,9 @@ MCP would standardize the same three tools for another client. This version has 
 - Supplier and Notion calls retry at most three times. A 4xx from Notion is not retried.
 - Creating a Notion page is idempotent on `request_id`, so a retry does not create a second page.
 - The LLM node is not retried. A failure is logged, the request becomes `Failed`, and the webhook returns that status.
+- An unknown supplier, or two suppliers in one request, stops the run before the model. `/suppliers/match` returns 404 or 409, and the request becomes `Failed` with the API message. It never falls back to another supplier.
+- Every failure after intake goes through `Capture Failure` and `POST /operations/{id}/fail`, so `/kpi` counts it. `Capture Failure` reads the intake from output 0 of `Normalize Request`: without that index, n8n reads the error output wired to the same node, which is empty.
+- Request ids come from one upsert on the yearly counter (`INSERT ... ON CONFLICT DO UPDATE ... RETURNING`). Two simultaneous intakes get two ids on SQLite and on Postgres.
 - If Notion cannot be updated after a human decision, the local status becomes `Failed` and the API returns 502. It does not report `Completed`.
 
 ## ROI and KPI

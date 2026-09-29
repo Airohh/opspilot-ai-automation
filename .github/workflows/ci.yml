@@ -7,6 +7,22 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: opspilot
+          POSTGRES_PASSWORD: opspilot-ci
+          POSTGRES_DB: opspilot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U opspilot -d opspilot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_POSTGRES_URL: postgresql+psycopg://opspilot:opspilot-ci@localhost:5432/opspilot
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,6 +32,8 @@ jobs:
         run: pip install -r api/requirements.txt -r api/requirements-dev.txt
       - name: Lint
         run: ruff check api tests scripts
+      - name: Format
+        run: ruff format --check api tests scripts
       - name: Test
         run: pytest
       - name: Build API image

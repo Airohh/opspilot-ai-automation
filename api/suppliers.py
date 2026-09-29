@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 SUPPLIER_ID = re.compile(r"[A-Za-z0-9_-]{1,32}")
+WORD = re.compile(r"[A-Z0-9_-]+")
 PUBLIC_FIELDS = (
     "id",
     "name",
@@ -38,4 +39,14 @@ class SupplierStore:
             item
             for item in self._suppliers.values()
             if needle in item["id"].lower() or needle in item["name"].lower()
+        ]
+
+    def match(self, text: str) -> list[dict]:
+        """Suppliers named in free text, by whole-word id or by full name."""
+        words = set(WORD.findall(text.upper()))
+        lowered = text.lower()
+        return [
+            item
+            for key, item in self._suppliers.items()
+            if key in words or item["name"].lower() in lowered
         ]

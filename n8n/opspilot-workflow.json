@@ -5,7 +5,7 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## OpsPilot\n\nWebhook, then FastAPI, then the agent.\n\nThe agent can read the supplier API, the policy files, and Notion.\n\nIt cannot complete a request. The Wait node is the human gate.\n\nAfter import: attach your LLM credential to OpenAI Chat Model, then activate the workflow.",
+        "content": "## OpsPilot\n\nWebhook, then FastAPI, then the agent.\n\nThe agent can read the supplier API, the policy files, and Notion.\n\nIt cannot complete a request. The Wait node is the human gate.\n\nAfter import: attach your LLM credential to OpenAI Chat Model, the requester Header Auth credential to Webhook, and the approver Header Auth credential to Wait for Human Approval. Then activate the workflow.",
         "height": 220,
         "width": 420
       },
@@ -22,6 +22,7 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "opspilot",
+        "authentication": "headerAuth",
         "responseMode": "responseNode",
         "options": {}
       },
@@ -33,7 +34,13 @@
         240,
         320
       ],
-      "webhookId": "opspilot-intake"
+      "webhookId": "opspilot-intake",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "opspilotWebhookToken",
+          "name": "OpsPilot Webhook Token"
+        }
+      }
     },
     {
       "parameters": {
@@ -294,7 +301,7 @@
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const prepared = $('Prepare Proposal').first().json;\nconst proposal = prepared.proposal;\nreturn [{ json: { request_id: prepared.request_id, status: 'Waiting Approval', request_summary: proposal.request_summary, information_consulted: proposal.information_consulted, facts: proposal.facts, assumptions: proposal.assumptions, analysis: proposal.analysis, proposed_action: proposal.proposed_action, expected_impact: proposal.expected_impact, tools_used: proposal.tools_used, approval_url: $execution.resumeUrl, how_to_approve: 'POST {\"decision\":\"approved\",\"approved_by\":\"your-name\"} to approval_url. Use decision rejected to stop without applying the action.', fallback_used: proposal.fallback_used === true, demonstration_data: true } }];"
+        "jsCode": "const prepared = $('Prepare Proposal').first().json;\nconst proposal = prepared.proposal;\nreturn [{ json: { request_id: prepared.request_id, status: 'Waiting Approval', request_summary: proposal.request_summary, information_consulted: proposal.information_consulted, facts: proposal.facts, assumptions: proposal.assumptions, analysis: proposal.analysis, proposed_action: proposal.proposed_action, expected_impact: proposal.expected_impact, tools_used: proposal.tools_used, approval_url: $execution.resumeUrl, how_to_approve: 'POST {\"decision\":\"approved\",\"approved_by\":\"your-name\"} to approval_url with the X-OpsPilot-Approver-Token header. Use decision rejected to stop without applying the action. Without a decision within 24 hours the request is rejected.', fallback_used: proposal.fallback_used === true, demonstration_data: true } }];"
       },
       "id": "b6c1a001-0001-4000-8000-000000000014",
       "name": "Build Webhook Response",
@@ -323,9 +330,14 @@
     {
       "parameters": {
         "resume": "webhook",
+        "incomingAuthentication": "headerAuth",
         "httpMethod": "POST",
         "responseMode": "lastNode",
         "responseData": "firstEntryJson",
+        "limitWaitTime": true,
+        "limitType": "afterTimeInterval",
+        "resumeAmount": 24,
+        "resumeUnit": "hours",
         "options": {}
       },
       "id": "b6c1a001-0001-4000-8000-000000000016",
@@ -335,12 +347,18 @@
       "position": [
         2880,
         320
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "opspilotApproverToken",
+          "name": "OpsPilot Approver Token"
+        }
+      }
     },
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const body = $json.body ?? $json;\nconst decision = String(body.decision || '').toLowerCase();\nconst approvedBy = body.approved_by || 'unknown';\nif (decision !== 'approved' && decision !== 'rejected') {\n  return [{ json: { decision: 'rejected', approved_by: approvedBy, error_message: 'Missing decision. Treated as rejected so no write action runs.' } }];\n}\nreturn [{ json: { decision, approved_by: approvedBy } }];"
+        "jsCode": "if ($json.body === undefined) {\n  return [{ json: { decision: 'rejected', approved_by: 'system:timeout', error_message: 'No decision within 24 hours. Treated as rejected so no write action runs.' } }];\n}\nconst body = $json.body;\nconst decision = String(body.decision || '').toLowerCase();\nconst approvedBy = body.approved_by || 'unknown';\nif (decision !== 'approved' && decision !== 'rejected') {\n  return [{ json: { decision: 'rejected', approved_by: approvedBy, error_message: 'Missing decision. Treated as rejected so no write action runs.' } }];\n}\nreturn [{ json: { decision, approved_by: approvedBy } }];"
       },
       "id": "b6c1a001-0001-4000-8000-000000000017",
       "name": "Read Approval Decision",
@@ -451,7 +469,7 @@
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "let requestId = null;\ntry { requestId = $('Normalize Request').all()[0].json.request_id; } catch (error) {}\nconst err = $json.error;\nconst raw = (typeof err === 'string' ? err : err && err.message) || $json.message || JSON.stringify($json);\nreturn [{ json: { request_id: requestId, error_message: String(raw).slice(0, 500) } }];"
+        "jsCode": "let requestId = null;\n// Output 0 is the intake result. Without the index, n8n reads the error output\n// that links Normalize Request directly to this node, which is empty.\ntry { requestId = $('Normalize Request').first(0).json.request_id; } catch (error) {}\nconst err = $json.error;\nconst raw = (typeof err === 'string' ? err : err && err.message) || $json.message || JSON.stringify($json);\nfunction readable(text) {\n  const match = /^\\d{3} - (\".*\")$/s.exec(text);\n  if (!match) return text;\n  try {\n    const body = JSON.parse(JSON.parse(match[1]));\n    return typeof body.detail === 'string' ? body.detail : text;\n  } catch (error) {\n    return text;\n  }\n}\nreturn [{ json: { request_id: requestId, error_message: readable(String(raw)).slice(0, 500) } }];"
       },
       "id": "b6c1a001-0001-4000-8000-000000000021",
       "name": "Capture Failure",
@@ -542,8 +560,8 @@
     },
     {
       "parameters": {
-        "method": "GET",
-        "url": "={{ $env.OPSPILOT_API_URL + '/suppliers/' + ($('Normalize Request').first().json.request.toUpperCase().includes('NORDIC') ? 'NORDIC' : $('Normalize Request').first().json.request.toUpperCase().includes('HELIX') ? 'HELIX' : $('Normalize Request').first().json.request.toUpperCase().includes('ACME') ? 'ACME' : 'UNKNOWN') }}",
+        "method": "POST",
+        "url": "={{ $env.OPSPILOT_API_URL + '/suppliers/match' }}",
         "sendHeaders": true,
         "specifyHeaders": "keypair",
         "headerParameters": {
@@ -554,6 +572,9 @@
             }
           ]
         },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: $('Normalize Request').first().json.request }) }}",
         "options": {}
       },
       "id": "b6c1a001-0001-4000-8000-000000000030",

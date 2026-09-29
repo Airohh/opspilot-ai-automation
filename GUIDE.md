@@ -48,10 +48,10 @@ ACME, dans `api/data/suppliers.json`, est à 60 jours, risque medium, contrat ac
 
 ## Le parcours, dans l’ordre
 
-1. `POST` vers le webhook n8n `/webhook/opspilot`.
+1. `POST` vers le webhook n8n `/webhook/opspilot`, avec le header `X-OpsPilot-Webhook-Token`. Sans lui : 403.
 2. n8n appelle `POST /operations/intake`. FastAPI crée un id `REQ-2026-001` et une ligne d’audit.
 3. n8n appelle `POST /notion/requests`. FastAPI crée la page Notion au statut `Processing`.
-4. n8n charge le prompt versionné : `GET /prompts/system`, fichier `prompts/opspilot_system.md`.
+4. n8n charge le prompt versionné : `GET /prompts/system`, fichier `prompts/opspilot_system.md`. Puis il demande à FastAPI quel fournisseur la demande nomme (`POST /suppliers/match`). Fournisseur inconnu, ou deux fournisseurs : statut `Failed` avec un message qui demande lequel, et le modèle n’est pas appelé.
 5. Le node **AI Agent** peut appeler trois outils, en lecture seule :
    - Supplier API Tool → `GET /suppliers/ACME`
    - Policy Tool → `GET /knowledge/search`
@@ -60,8 +60,8 @@ ACME, dans `api/data/suppliers.json`, est à 60 jours, risque medium, contrat ac
 7. FastAPI écrit cette proposition sur la page Notion et passe le statut à `Waiting Approval`.
 8. Le webhook te répond tout de suite, avec une `approval_url`.
 9. Le node **Wait** bloque l’exécution.
-10. Tu postes `{"decision":"approved","approved_by":"ton-nom"}` ou `rejected` sur cette URL.
-11. Si c’est approuvé, FastAPI passe Notion à `Completed`. Si c’est refusé, `Rejected`. Une décision absente ou inconnue est traitée comme un refus, pour ne pas écrire par défaut.
+10. Tu postes `{"decision":"approved","approved_by":"ton-nom"}` ou `rejected` sur cette URL, avec le header `X-OpsPilot-Approver-Token`. C’est un autre secret que celui du webhook.
+11. Si c’est approuvé, FastAPI passe Notion à `Completed`. Si c’est refusé, `Rejected`. Une décision absente ou inconnue est traitée comme un refus, pour ne pas écrire par défaut. Sans décision sous 24 heures, la demande est refusée avec `approved_by` = `system:timeout`.
 12. Un événement d’audit est ajouté. `GET /kpi` compte les vraies exécutions. `GET /roi` calcule une simulation à part.
 
 L’agent n’a pas d’outil d’écriture. Les écritures sont des nodes HTTP placés après le Wait. Même si le modèle écrit « pas besoin d’approbation », le workflow attend quand même.
@@ -113,7 +113,7 @@ Créer la page au début n’est pas l’action sensible. C’est le ticket. L�
 - `LLM_API_KEY` se colle dans l’écran de credential n8n. Compose ne l’injecte ni dans n8n ni dans l’API.
 - `NOTION_API_KEY` va seulement à l’API. L’intégration Notion doit être invitée uniquement sur la page parente du POC, pas sur tout le workspace.
 - Les textes récupérés sont marqués `untrusted_data`. Le prompt dit de ne pas suivre les instructions cachées dedans.
-- Le webhook n8n n’a pas d’authentification. Il doit rester sur localhost. Sinon n’importe qui peut lancer des appels payants au modèle.
+- Le webhook exige le header `X-OpsPilot-Webhook-Token` (credential Header Auth dans n8n). L’URL d’approbation est signée par n8n et exige un autre header, `X-OpsPilot-Approver-Token`. Celui qui envoie une demande ne peut pas l’approuver avec le même secret. Compose publie les ports sur 127.0.0.1 seulement.
 - Le token `INTERNAL_API_TOKEN` prouve seulement que l’appelant connaît le secret local. Il ne prouve pas qu’un humain a cliqué.
 
 ## Ce qu’il reste pour la démo de 5 minutes
@@ -130,7 +130,7 @@ docker rm n8n
 ```
 
 6. Depuis le dossier du projet : `docker compose up --build`.
-7. Ouvrir http://localhost:5678, créer le compte local, importer `n8n/opspilot-workflow.json`, attacher le credential au node **OpenAI Chat Model**, activer le workflow.
+7. Ouvrir http://localhost:5678, créer le compte local, créer les deux credentials Header Auth décrits dans le README (`OpsPilot Webhook Token`, `OpsPilot Approver Token`), importer `n8n/opspilot-workflow.json`, attacher les credentials aux nodes **OpenAI Chat Model**, **Webhook** et **Wait for Human Approval**, activer le workflow.
 8. Envoyer la demande ACME, montrer les tools, la proposition, approuver ou refuser, ouvrir la page Notion, puis `GET /audit/{request_id}`, `GET /kpi` et `GET /roi`.
 
 Le `docker rm` efface le conteneur, pas forcément le volume. Compose utilise un autre volume, `opspilot_n8n_data`. Tu referas le compte propriétaire dans cette nouvelle instance. C’est normal.
@@ -139,6 +139,7 @@ Commande de démo, une fois le workflow actif :
 
 ```powershell
 curl.exe -X POST http://localhost:5678/webhook/opspilot `
+  -H "X-OpsPilot-Webhook-Token: <OPSPILOT_WEBHOOK_TOKEN>" `
   -H "Content-Type: application/json" `
   -d "{\"request\":\"Analyse la demande du fournisseur ACME concernant ses conditions de paiement. Ils demandent 90 jours au lieu de 60.\",\"requester\":\"portfolio-user\"}"
 ```
@@ -158,6 +159,6 @@ Dans PowerShell, utilise `curl.exe`. `curl` seul est un alias qui ne fait pas la
 
 - L’écran d’approbation est l’URL du node Wait, pas une interface produit.
 - L’action exécutée met à jour Notion. Elle ne parle pas à un ERP.
-- Deux demandes envoyées en même temps sur SQLite peuvent encore se marcher sur le compteur `REQ-YYYY-NNN`. Postgres prend un verrou `FOR UPDATE`.
+- Le webhook et l’approbation sont protégés par des tokens partagés, pas par des comptes. `approved_by` est ce que l’approbateur écrit.
 - Les appels au modèle ne sont pas retentés, pour ne pas payer trois fois la même panne. Les appels HTTP et Notion sont retentés au plus trois fois.
 - Si Notion tombe après le choix humain, le statut local devient `Failed` et l’API répond 502. Elle ne répond pas `Completed`.

@@ -20,9 +20,11 @@ The agent tools are read endpoints. The model has no tool that creates or update
 
 `Completed` is set only by `POST /operations/{id}/resolve` with decision `approved`, and only when the current status is `Waiting Approval`. The n8n path to that call goes through the Wait node. A missing or unknown decision is sent as `rejected`.
 
+The approval URL is signed by n8n (a `signature` query parameter) and also requires the `X-OpsPilot-Approver-Token` header. That secret is different from the webhook token, so a requester cannot approve their own request with the secret they submit with. Without a decision within 24 hours, the Wait node resumes and the workflow records a rejection with `approved_by` set to `system:timeout`.
+
 The API does not prove that a human used the Wait node. Anyone who can call the API with `INTERNAL_API_TOKEN` can resolve a waiting request. Keep port 8080 on localhost, and treat the token as a local secret rather than as authentication.
 
-The webhook on port 5678 has no header auth in this version. Anyone who can reach it can submit a request and spend model calls. Do not publish that port.
+The webhook requires the `X-OpsPilot-Webhook-Token` header through an n8n Header Auth credential. A request without it gets 403 and spends no model call. Compose publishes ports 5678 and 8080 on 127.0.0.1 only.
 
 ## Prompt injection
 
@@ -40,12 +42,12 @@ A Notion failure after a decision is stored as `Failed` with the error message. 
 
 ## Dependencies and supply chain
 
-Python dependencies are pinned in `api/requirements.txt`. GitHub Actions installs them, runs ruff and pytest, and builds the API image. It does not deploy.
+Python dependencies are pinned in `api/requirements.txt`. GitHub Actions installs them, runs ruff (lint and format), runs pytest on SQLite and PostgreSQL, and builds the API image. It does not deploy.
 
 ## Known gaps
 
 - No user accounts on the API.
-- No webhook signature.
+- The webhook and approval tokens are shared secrets, not user identities. `approved_by` is what the approver types.
 - The internal token ships as a placeholder until you change it.
 - Notion API version `2022-06-28` is pinned. If Notion rejects that version, the setup script and the adapter return the error body and do not write a success.
 - Policy documents are local files. Replacing them with untrusted web pages would need a stricter size limit than the one used here.
