@@ -1,0 +1,9 @@
+{
+  "comment": "Configurable assumptions for a simulation. These numbers are not measured results.",
+  "manual_minutes_per_request": 8,
+  "automated_review_minutes_per_request": 1.5,
+  "requests_per_month": 100,
+  "hourly_labor_cost_eur": 35,
+  "llm_cost_per_request_eur": 0.02,
+  "platform_cost_per_month_eur": 0
+}

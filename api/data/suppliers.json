@@ -1,0 +1,29 @@
+{
+  "comment": "Demonstration data. These suppliers are fictional and exist only for the OpsPilot portfolio demo.",
+  "suppliers": [
+    {
+      "id": "ACME",
+      "name": "ACME Components",
+      "category": "Industrial components",
+      "payment_terms": 60,
+      "risk_level": "medium",
+      "contract_status": "active"
+    },
+    {
+      "id": "NORDIC",
+      "name": "Nordic Steel",
+      "category": "Raw materials",
+      "payment_terms": 45,
+      "risk_level": "low",
+      "contract_status": "active"
+    },
+    {
+      "id": "HELIX",
+      "name": "Helix Logistics",
+      "category": "Freight",
+      "payment_terms": 30,
+      "risk_level": "high",
+      "contract_status": "under_review"
+    }
+  ]
+}

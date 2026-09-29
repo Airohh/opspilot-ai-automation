@@ -1,0 +1,61 @@
+name: opspilot
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: opspilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: opspilot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opspilot -d opspilot"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build: ./api
+    environment:
+      DATABASE_URL: postgresql+psycopg://opspilot:${POSTGRES_PASSWORD}@postgres:5432/opspilot
+      NOTION_API_KEY: ${NOTION_API_KEY:-}
+      NOTION_DATABASE_ID: ${NOTION_DATABASE_ID:-}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      KNOWLEDGE_DIR: /app/knowledge
+      PROMPT_PATH: /app/prompts/opspilot_system.md
+      ROI_ASSUMPTIONS_PATH: /app/config/roi_assumptions.json
+    volumes:
+      - ./knowledge:/app/knowledge:ro
+      - ./prompts:/app/prompts:ro
+      - ./config:/app/config:ro
+    ports:
+      - "8080:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  n8n:
+    image: n8nio/n8n:2.41.3
+    ports:
+      - "5678:5678"
+    environment:
+      GENERIC_TIMEZONE: Europe/Paris
+      TZ: Europe/Paris
+      N8N_HOST: localhost
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: http
+      N8N_WEBHOOK_URL: http://localhost:5678/
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      OPSPILOT_API_URL: http://api:8000
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN}
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  n8n_data:
