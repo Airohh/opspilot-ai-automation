@@ -7,8 +7,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="module")
-def nodes() -> dict:
-    workflow = json.loads((ROOT / "n8n" / "opspilot-workflow.json").read_text(encoding="utf-8"))
+def workflow() -> dict:
+    return json.loads((ROOT / "n8n" / "opspilot-workflow.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def nodes(workflow) -> dict:
     return {node["name"]: node for node in workflow["nodes"]}
 
 
@@ -37,10 +41,23 @@ def test_supplier_is_resolved_by_the_api(nodes):
         assert supplier_id not in json.dumps(params)
 
 
-def test_agent_tools_are_read_only(nodes):
-    tools = [node for node in nodes.values() if node["type"].endswith("httpRequestTool")]
-    assert len(tools) == 3
-    assert {tool["parameters"]["method"] for tool in tools} == {"GET"}
+def test_model_step_is_one_call_without_tools(workflow, nodes):
+    types = {node["type"] for node in nodes.values()}
+    assert "@n8n/n8n-nodes-langchain.agent" not in types
+    assert not [name for name in types if name.endswith("Tool")]
+    assert all("ai_tool" not in outputs for outputs in workflow["connections"].values())
+    chain = nodes["Draft Proposal"]
+    assert chain["type"] == "@n8n/n8n-nodes-langchain.chainLlm"
+    assert chain["onError"] == "continueErrorOutput"
+
+
+def test_model_output_is_held_to_the_served_schema(nodes):
+    model = nodes["OpenAI Chat Model"]["parameters"]
+    assert model["responsesApiEnabled"] is False
+    assert "type: 'json_schema'" in model["options"]["extraBody"]
+    assert "strict: true" in model["options"]["extraBody"]
+    assert "output_schema" in model["options"]["extraBody"]
+    assert "output_schema" in nodes["Prepare Proposal"]["parameters"]["jsCode"]
 
 
 def test_failure_path_reads_the_intake_output(nodes):

@@ -20,15 +20,17 @@ Vérifié le 29 septembre 2026 sur cette machine :
 | Docker Compose (n8n + API + Postgres ensemble) | Pas lancé. Le n8n actuel est un conteneur séparé. |
 | Agent LLM qui analyse ACME | Exécuté. REQ-2026-008 a produit une proposition. Si le JSON du modèle est invalide, le nœud Prepare Proposal construit une proposition de secours et met `fallback_used` à true. |
 
+Depuis cette vérification, l’agent et ses trois outils ont été remplacés par un seul appel au modèle (node **Draft Proposal**), avec un schéma JSON strict. Il faut refaire la démo avec le nouveau workflow.
+
 L’API locale utilise SQLite, charge `.env`, et Notion est configuré. Ce n’est pas le stack Docker Compose.
 
 Le port **8000 est inutilisable sur ce PC**. Windows réserve la plage 7902–8001. Docker ne pourrait pas publier l’API dessus. Le port public est donc **8080**. À l’intérieur du réseau Docker, l’API reste sur le port 8000, et n8n l’appelle par `http://api:8000`. Depuis ton navigateur ou `curl`, tu utilises `http://localhost:8080`.
 
 ## La phrase à dire
 
-I built an AI automation workflow where n8n orchestrates the steps, the model writes a proposal from the supplier record and the policy loaded before it, Notion stores the request, FastAPI exposes the business data, a human must approve before the Notion page is completed, and every execution is logged. The read tools are connected, and this demo does not let the model call them, because that loop never returned a proposal.
+I built an AI automation workflow where n8n orchestrates the steps and retrieves the supplier record and the policy, one model call writes a proposal held to a JSON schema, Notion stores the request, a human must approve before anything is written, and every execution is logged and measured. I started with an agent that chose its own tools. It looped without answering, so I moved the known steps into the workflow and kept the model for the step that needs judgment.
 
-En français : n8n conduit le parcours. Le modèle rédige la proposition à partir de la fiche et de la politique déjà chargées. Notion est le dossier métier. FastAPI porte les données, l’écriture Notion, l’audit et le calcul de ROI. Une action sensible ne part qu’après un humain. Chaque exécution laisse une trace.
+En français : n8n conduit le parcours et récupère la fiche fournisseur et la politique. Un seul appel au modèle rédige la proposition, dans un schéma JSON imposé. Notion est le dossier métier. FastAPI porte les données, l’écriture Notion, l’audit et le calcul de ROI. Une action sensible ne part qu’après un humain. Chaque exécution laisse une trace. J’ai commencé avec un agent qui choisissait ses outils. Il tournait en boucle sans répondre. J’ai donc mis les étapes connues dans le workflow et gardé le modèle pour la seule étape qui demande du jugement.
 
 ## Le cas d’usage
 
@@ -52,11 +54,8 @@ ACME, dans `api/data/suppliers.json`, est à 60 jours, risque medium, contrat ac
 2. n8n appelle `POST /operations/intake`. FastAPI crée un id `REQ-2026-001` et une ligne d’audit.
 3. n8n appelle `POST /notion/requests`. FastAPI crée la page Notion au statut `Processing`.
 4. n8n charge le prompt versionné : `GET /prompts/system`, fichier `prompts/opspilot_system.md`. Puis il demande à FastAPI quel fournisseur la demande nomme (`POST /suppliers/match`). Fournisseur inconnu, ou deux fournisseurs : statut `Failed` avec un message qui demande lequel, et le modèle n’est pas appelé.
-5. Le node **AI Agent** peut appeler trois outils, en lecture seule :
-   - Supplier API Tool → `GET /suppliers/ACME`
-   - Policy Tool → `GET /knowledge/search`
-   - Notion Read Tool → `GET /notion/requests`
-6. Le modèle rend une proposition structurée : résumé, sources, faits, hypothèses, analyse, action, impact.
+5. n8n charge la politique (`GET /knowledge/search`). Le node **Draft Proposal** envoie la demande, la fiche fournisseur et la politique au modèle, en un seul appel. Le modèle n’a aucun outil. Sa réponse doit suivre `prompts/proposal_schema.json` (mode strict d’OpenAI).
+6. Le modèle rend une proposition structurée : résumé, sources, faits, hypothèses, analyse, action, impact, besoin de clarification. **Prepare Proposal** vérifie le schéma. S’il manque un champ, une règle fixe construit la proposition et `fallback_used` passe à true.
 7. FastAPI écrit cette proposition sur la page Notion et passe le statut à `Waiting Approval`.
 8. Le webhook te répond tout de suite, avec une `approval_url`.
 9. Le node **Wait** bloque l’exécution.
@@ -64,19 +63,23 @@ ACME, dans `api/data/suppliers.json`, est à 60 jours, risque medium, contrat ac
 11. Si c’est approuvé, FastAPI passe Notion à `Completed`. Si c’est refusé, `Rejected`. Une décision absente ou inconnue est traitée comme un refus, pour ne pas écrire par défaut. Sans décision sous 24 heures, la demande est refusée avec `approved_by` = `system:timeout`.
 12. Un événement d’audit est ajouté. `GET /kpi` compte les vraies exécutions. `GET /roi` calcule une simulation à part.
 
-L’agent n’a pas d’outil d’écriture. Les écritures sont des nodes HTTP placés après le Wait. Même si le modèle écrit « pas besoin d’approbation », le workflow attend quand même.
+Le modèle n’a aucun outil. Les lectures et les écritures sont des nodes HTTP du workflow, et les écritures sont placées après le Wait. Même si le modèle écrit « pas besoin d’approbation », le workflow attend quand même.
 
 ## Pourquoi ces choix
 
-**n8n plutôt qu’un script Python seul.** L’offre demande de voir l’orchestration, l’agent et l’humain dans la boucle. Le canvas montre le webhook, les outils, le Wait et la branche approuvé / refusé. Python reste là où il faut des tests.
+**n8n plutôt qu’un script Python seul.** L’offre demande de voir l’orchestration, l’IA et l’humain dans la boucle. Le canvas montre le webhook, la récupération des données, l’appel au modèle, le Wait et la branche approuvé / refusé. Python reste là où il faut des tests.
 
-**Un agent plutôt qu’un seul appel LLM.** La liste d’outils est la limite de ce qu’il a le droit de faire. `maxIterations` est à 4 pour qu’une boucle d’outils ne tourne pas sans fin. Dans la démo, le workflow charge le fournisseur et la politique avant l’agent, puis lui demande de répondre avec ces données. Les trois outils restent branchés. Sans ce chargement, l’agent utilisait tous ses tours à rappeler les outils et ne rendait pas de proposition.
+**Un seul appel au modèle plutôt qu’un agent.** La première version donnait trois outils à un node AI Agent. Avec gpt-4o-mini, il utilisait tous ses tours à appeler les outils et ne rendait pas de proposition. Or les étapes de ce type de demande sont connues d’avance : trouver le fournisseur, lire la politique, rédiger. n8n fait donc la récupération, et le modèle fait la seule étape qui demande du jugement. Résultat : un appel par demande, un coût prévisible, pas de boucle à borner.
+
+Si on te demande « l’offre parle d’agents, pourquoi pas ici ? » : un agent se justifie quand le chemin n’est pas connu d’avance, par exemple une question ouverte qui peut demander le fournisseur, la politique ou l’historique dans n’importe quel ordre. Ce n’est pas le cas ici. Le serveur MCP prévu dans la roadmap exposera les mêmes lectures à un client agent comme Claude.
+
+**Un schéma JSON strict.** Le node OpenAI envoie `response_format` en `json_schema` avec `strict: true`, construit depuis `prompts/proposal_schema.json`. Il passe par Chat Completions et non par l’API Responses, parce que n8n 2.41 n’y transmet pas `strict` et y ajoute un champ `verbosity`. Une réponse qui n’est pas du JSON du tout fait échouer la demande (`Failed`).
 
 **FastAPI devant Notion, plutôt que le node Notion de n8n.** Le node Notion de n8n 2.41 dépend de la base ouverte dans l’éditeur. Un export git ne se réimporte pas proprement sur une autre base. Le contrat HTTP, lui, est dans `api/notion_client.py` et se teste. Le token Notion reste dans le conteneur API. Il n’est pas mis dans l’environnement n8n, parce que les expressions n8n peuvent lire les variables d’environnement.
 
 **Recherche par mots, pas un RAG.** Il y a quatre fichiers markdown. Un index vectoriel ajouterait Qdrant et des embeddings sans changer la démo. Syro n’est pas appelé : il n’est pas disponible, et le projet ne prétend pas le contraire. Le jour où un vrai retrieval existe, on remplace le contenu de `GET /knowledge/search` sans changer le workflow.
 
-**Pas de MCP dans cette version.** MCP servirait si plusieurs clients devaient utiliser les mêmes outils. Ici le seul client est n8n, et les outils sont déjà des URL. Le mettre maintenant doublerait l’adaptateur seulement pour afficher le mot MCP. `ARCHITECTURE.md` décrit la version suivante : un serveur MCP devant Notion, l’API fournisseur et la politique.
+**Pas de MCP dans cette version.** MCP servirait à exposer les lectures (fournisseur, politique, Notion) à un autre client, qui serait alors l’agent. Ici le seul client est n8n, et il appelle déjà les URL directement. `ARCHITECTURE.md` décrit la version suivante : un serveur MCP devant Notion, l’API fournisseur et la politique.
 
 **Postgres dans Docker, SQLite pour les tests.** Les KPI doivent être des requêtes, pas un fichier log qu’on relit à la main. Les tests n’ont pas besoin de démarrer Postgres. Les mêmes tables SQLAlchemy servent aux deux.
 
@@ -131,7 +134,7 @@ docker rm n8n
 
 6. Depuis le dossier du projet : `docker compose up --build`.
 7. Ouvrir http://localhost:5678, créer le compte local, créer les deux credentials Header Auth décrits dans le README (`OpsPilot Webhook Token`, `OpsPilot Approver Token`), importer `n8n/opspilot-workflow.json`, attacher les credentials aux nodes **OpenAI Chat Model**, **Webhook** et **Wait for Human Approval**, activer le workflow.
-8. Envoyer la demande ACME, montrer les tools, la proposition, approuver ou refuser, ouvrir la page Notion, puis `GET /audit/{request_id}`, `GET /kpi` et `GET /roi`.
+8. Envoyer la demande ACME, montrer la récupération des données et l’appel au modèle, la proposition, approuver ou refuser, ouvrir la page Notion, puis `GET /audit/{request_id}`, `GET /kpi` et `GET /roi`.
 
 Le `docker rm` efface le conteneur, pas forcément le volume. Compose utilise un autre volume, `opspilot_n8n_data`. Tu referas le compte propriétaire dans cette nouvelle instance. C’est normal.
 
@@ -152,7 +155,7 @@ Dans PowerShell, utilise `curl.exe`. `curl` seul est un alias qui ne fait pas la
 - Que Syro, MCP, Slack ou un RAG sont dans le workflow.
 - Que les fournisseurs ACME, Nordic Steel et Helix Logistics existent.
 - Que des pages Notion personnelles ont été modifiées. Seule la base AI Automation Lab l’a été.
-- Que l’agent choisit lui-même ses outils sur cette démo. Les fiches sont chargées avant lui.
+- Qu’un agent choisit ses outils. Le workflow récupère les données, et le modèle n’a aucun outil.
 - Qu’une proposition sans `fallback_used: true` a forcément été écrite par le modèle. Si ce champ est true, le plan B a servi.
 
 ## Limites à assumer en entretien

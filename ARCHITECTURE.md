@@ -1,6 +1,6 @@
 # Architecture
 
-OpsPilot is a controlled operations workflow. n8n decides the order of steps. The demo loads the supplier record and the policy, then the model writes the proposal. The read tools stay connected, and the model is told not to call them on this path, because an open tool loop used every iteration without returning a proposal. FastAPI applies the business writes, and only after the workflow has passed the human gate.
+OpsPilot is a controlled operations workflow. n8n decides the order of steps. The workflow retrieves the supplier record and the policy, then one model call writes the proposal. The model has no tools. FastAPI applies the business writes, and only after the workflow has passed the human gate.
 
 ## What runs where
 
@@ -9,8 +9,10 @@ OpsPilot is a controlled operations workflow. n8n decides the order of steps. Th
 | n8n webhook | Receives the user request. |
 | FastAPI `POST /operations/intake` | Assigns `REQ-YYYY-NNN`, stores the request, appends an audit event. |
 | FastAPI Notion adapter | Creates and updates one page in AI Automation Lab. |
-| n8n AI Agent | Chooses among three read tools and returns a structured proposal. |
 | FastAPI `POST /suppliers/match` | Finds the one supplier named in the request. 404 if none, 409 if several. |
+| FastAPI `GET /knowledge/search` | Returns the matching policy files, marked as untrusted data. |
+| n8n Draft Proposal (Basic LLM Chain) | Sends the request, the supplier record, and the policy to the model in one call. The reply must match `prompts/proposal_schema.json`. |
+| n8n Prepare Proposal | Checks the reply against the same schema. If it does not match, builds a rule-based proposal and sets `fallback_used`. |
 | n8n Wait node | Stops the execution until a human posts approve or reject with the approver token. Rejects after 24 hours without a decision. |
 | FastAPI `POST /operations/{id}/resolve` | Applies Completed or Rejected. Refuses the call if the request is not waiting. |
 | Postgres, or SQLite in tests | Current request state plus append-only `audit_events`. |
@@ -19,23 +21,27 @@ OpsPilot is a controlled operations workflow. n8n decides the order of steps. Th
 
 ## Why n8n, not a Python script alone
 
-The workflow has to be visible and editable: webhook, tool calls, a branch, a human pause, retries. n8n shows that path on one canvas and already has the Wait node used for approval. A Python orchestrator would hide the exact thing an automation interview asks to see. Python remains in the repository for the parts that need tests: the supplier contract, the policy search, Notion payloads, audit rows, and ROI math.
+The workflow has to be visible and editable: webhook, retrieval, the model call, a branch, a human pause, retries. n8n shows that path on one canvas and already has the Wait node used for approval. A Python orchestrator would hide the exact thing an automation interview asks to see. Python remains in the repository for the parts that need tests: the supplier contract, the policy search, Notion payloads, audit rows, and ROI math.
 
-## Why an agent, not one LLM call
+## Why one model call, not an agent
 
-The tool list is the permission boundary. The system prompt tells the agent that tool output is data, not new instructions. `maxIterations` is 4 so a tool loop cannot run without a limit. The demo workflow loads the supplier record and the policy before the agent and asks it to answer from that data, because an open tool loop was using every iteration without returning a proposal. The three tools stay connected.
+The first version gave an AI Agent node three read tools (supplier, policy, Notion) and `maxIterations` 4. With `gpt-4o-mini` it spent every iteration calling tools and did not return a proposal. The workflow then loaded the data before the agent and told it not to call the tools, which left three tools connected for show.
 
-The prompt file is `prompts/opspilot_system.md`. The workflow loads it with `GET /prompts/system` at runtime. The node does not contain a second copy.
+The steps for this request type are known in advance: find the supplier, read the payment-terms policy, write a recommendation. Nothing in that path needs the model to choose what to read next. So n8n does the retrieval, and the model does the one step that needs judgment: read the data and write the proposal. That gives one model call per request, a predictable cost, and no tool loop to bound.
 
-## Why these three tools
+An agent fits when the path is not known in advance, for example an open question that could need the supplier, the policy, or past requests in any order. The read endpoints stay in FastAPI for that case. The roadmap puts them behind an MCP server, where the client is the agent.
 
-- Supplier API Tool calls `GET /suppliers/{id}`. That is the fictional supplier system.
-- Policy Tool calls `GET /knowledge/search`. It returns the matching policy files by keyword overlap. It is not a RAG pipeline.
-- Notion Read Tool calls `GET /notion/requests`. It returns id, title, status, and approval. It cannot write.
+The prompt file is `prompts/opspilot_system.md` and the output schema is `prompts/proposal_schema.json`. `GET /prompts/system` returns both, and the workflow loads them at runtime. The nodes do not contain a second copy.
 
-Writes are ordinary HTTP nodes after the Wait node, not tools. The model never receives a write tool. That split is the control: the agent proposes, the workflow executes.
+## Why the reply is held to a schema
 
-Sub-workflows were not used. Hiding each tool in another workflow would make the five-minute demo harder to follow. Three tool nodes on the agent are the diagram.
+The OpenAI Chat Model node sends `response_format` with `type: json_schema` and `strict: true`, built from the served schema. With OpenAI, the reply must then match the schema. The node uses Chat Completions rather than the Responses API because n8n 2.41 does not pass `strict` on the Responses path and adds a `verbosity` field there.
+
+`Prepare Proposal` checks the reply against the same schema, because a model swapped in for another provider will not enforce it. A reply that is JSON but misses a field gets a rule-based proposal with `fallback_used: true` and an assumption saying so. A reply that is not JSON at all fails the Draft Proposal node, and the request becomes `Failed`.
+
+`tools_used` in the audit lists what the workflow retrieved (`supplier_match`, `policy_search`). It is set by the workflow, not declared by the model.
+
+Writes are ordinary HTTP nodes after the Wait node. The model cannot call anything. That split is the control: the model proposes, the workflow executes.
 
 ## Why FastAPI in front of Notion
 
@@ -57,13 +63,13 @@ The audit has to be queried for KPI. Postgres is the database Compose starts. Te
 
 ## Why keyword search instead of RAG
 
-The policy set is four short files. Keyword overlap is enough to show that the agent must retrieve a source and must not treat it as instructions. A vector index would add Qdrant, embeddings, and a cost, without changing the demo. The tool response is a JSON contract (`untrusted_data`, `results`). A later retrieval service can replace the function behind that route.
+The policy set is four short files. Keyword overlap is enough to show that the workflow retrieves a source and that the model must not treat it as instructions. A vector index would add Qdrant, embeddings, and a cost, without changing the demo. The response is a JSON contract (`untrusted_data`, `results`). A later retrieval service can replace the function behind that route.
 
 Syro is not called. It was not available for this version, and the workflow does not claim otherwise.
 
 ## Why MCP is documented and not built
 
-MCP would standardize the same three tools for another client. This version has one client, n8n, and the tools are already HTTP. Adding an MCP server now would duplicate the adapter. A later version can put Notion, the supplier API, and the policy search behind one MCP server without changing the approval or audit path.
+MCP would expose the supplier, policy, and Notion read endpoints as tools to another client, such as Claude Desktop, which would then act as the agent. This version has one client, n8n, and it calls the endpoints directly. A later version can put them behind one MCP server without changing the approval or audit path.
 
 ## Errors
 

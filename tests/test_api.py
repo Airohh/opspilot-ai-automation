@@ -125,7 +125,21 @@ def test_policy_search_marks_documents_untrusted(client: TestClient):
 def test_system_prompt_is_served_from_the_repository(client: TestClient):
     response = client.get("/prompts/system")
     assert response.status_code == 200
-    assert "Never invent business information." in response.json()["content"]
+    body = response.json()
+    assert body["version"] == "2"
+    assert "Never invent business information." in body["content"]
+
+
+def test_output_schema_matches_the_prompt_and_the_proposal_route(client: TestClient):
+    from main import ProposalIn
+
+    body = client.get("/prompts/system").json()
+    schema = body["output_schema"]
+    assert set(schema["required"]) == set(schema["properties"])
+    assert schema["additionalProperties"] is False
+    assert set(schema["properties"]) <= set(ProposalIn.model_fields)
+    for key in schema["required"]:
+        assert key in body["content"]
 
 
 def test_workflow_loads_the_versioned_prompt():

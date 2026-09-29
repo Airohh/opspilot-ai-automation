@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "properties": {
+    "request_summary": {"type": "string"},
+    "information_consulted": {"type": "array", "items": {"type": "string"}},
+    "facts": {"type": "array", "items": {"type": "string"}},
+    "assumptions": {"type": "array", "items": {"type": "string"}},
+    "analysis": {"type": "string"},
+    "proposed_action": {"type": "string"},
+    "expected_impact": {"type": "string"},
+    "clarification_needed": {"type": "boolean"}
+  },
+  "required": [
+    "request_summary",
+    "information_consulted",
+    "facts",
+    "assumptions",
+    "analysis",
+    "proposed_action",
+    "expected_impact",
+    "clarification_needed"
+  ],
+  "additionalProperties": false
+}

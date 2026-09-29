@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from suppliers import SupplierStore
 
 logger = logging.getLogger("opspilot")
 REPO_ROOT = Path(__file__).resolve().parents[1]
+PROMPT_VERSION = re.compile(r"^Version: (\S+)$", re.MULTILINE)
 
 
 def _load_env_file(path: Path) -> None:
@@ -167,6 +169,10 @@ def create_app(
     knowledge = KnowledgeBase(knowledge_dir)
     supplier_store = SupplierStore(suppliers_path)
     prompt_text = prompt_path.read_text(encoding="utf-8")
+    prompt_version = PROMPT_VERSION.search(prompt_text)
+    output_schema = json.loads(
+        prompt_path.with_name("proposal_schema.json").read_text(encoding="utf-8")
+    )
     notion = None
     if notion_api_key and notion_database_id:
         notion = NotionClient(notion_api_key, notion_database_id)
@@ -184,6 +190,8 @@ def create_app(
     app.state.knowledge = knowledge
     app.state.suppliers = supplier_store
     app.state.prompt_text = prompt_text
+    app.state.prompt_version = prompt_version.group(1) if prompt_version else None
+    app.state.output_schema = output_schema
     app.state.notion = notion
     app.state.notion_api_key = notion_api_key
     app.state.notion_database_id = notion_database_id
@@ -250,7 +258,12 @@ def create_app(
 
     @app.get("/prompts/system")
     def system_prompt(request: Request, _: None = Depends(require_token)) -> dict:
-        return {"version": "1", "content": request.app.state.prompt_text}
+        state = request.app.state
+        return {
+            "version": state.prompt_version,
+            "content": state.prompt_text,
+            "output_schema": state.output_schema,
+        }
 
     @app.post("/operations/intake")
     def intake(

@@ -14,7 +14,7 @@ API keys are not committed. `.env` is gitignored. `.env.example` contains empty 
 
 The Notion integration should be invited only to the parent page used by `scripts/setup_notion.py`. The script creates `AI Automation Lab` under that page and stops. It has no search across the workspace.
 
-The agent tools are read endpoints. The model has no tool that creates or updates a page.
+The model has no tools. It receives the request, the supplier record, and the policy text in one call, and returns a proposal. Every read and write is an HTTP node that the workflow runs.
 
 ## Human approval
 
@@ -28,7 +28,7 @@ The webhook requires the `X-OpsPilot-Webhook-Token` header through an n8n Header
 
 ## Prompt injection
 
-Supplier JSON, policy files, and Notion pages are returned with `untrusted_data: true` where the route is a tool. The system prompt says to treat retrieved text as data and not as instructions. The agent has no write tool, and `maxIterations` limits tool loops. This reduces the impact of an instruction hidden in a page. It does not make prompt injection impossible.
+Policy files and Notion pages are returned with `untrusted_data: true` and a notice. The system prompt says to treat the supplier record and the policy text as data, not as instructions. The model has no tools, so an instruction hidden in a policy file cannot make it read or write anything. The worst case is a wrong proposal: it must still match the schema, and it still goes to a human. This reduces the impact of prompt injection. It does not make it impossible.
 
 ## Data minimization
 
