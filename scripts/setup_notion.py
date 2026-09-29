@@ -44,22 +44,33 @@ def main() -> int:
         "title": [{"type": "text", "text": {"content": "AI Automation Lab"}}],
         "properties": {
             "Request": {"title": {}},
-            "Status": {"select": {"options": [_option(name) for name in (
-                "Pending",
-                "Processing",
-                "Waiting Approval",
-                "Approved",
-                "Rejected",
-                "Completed",
-                "Failed",
-            )]}},
+            "Status": {
+                "select": {
+                    "options": [
+                        _option(name)
+                        for name in (
+                            "Pending",
+                            "Processing",
+                            "Waiting Approval",
+                            "Approved",
+                            "Rejected",
+                            "Completed",
+                            "Failed",
+                        )
+                    ]
+                }
+            },
             "AI Analysis": {"rich_text": {}},
             "Proposed Action": {"rich_text": {}},
-            "Human Approval": {"select": {"options": [
-                _option("Pending"),
-                _option("Approved"),
-                _option("Rejected"),
-            ]}},
+            "Human Approval": {
+                "select": {
+                    "options": [
+                        _option("Pending"),
+                        _option("Approved"),
+                        _option("Rejected"),
+                    ]
+                }
+            },
             "Created At": {"date": {}},
             "Processed At": {"date": {}},
             "Request ID": {"rich_text": {}},

@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
 def main() -> int:
     sys.path.insert(0, str(ROOT / "api"))
     from roi import calculate_roi, load_assumptions

@@ -246,22 +246,8 @@
     },
     {
       "parameters": {
-        "schemaType": "fromJson",
-        "jsonSchemaExample": "{\n  \"request_summary\": \"\",\n  \"information_consulted\": [],\n  \"facts\": [],\n  \"assumptions\": [],\n  \"analysis\": \"\",\n  \"proposed_action\": \"\",\n  \"expected_impact\": \"\",\n  \"requires_human_approval\": true,\n  \"clarification_needed\": false,\n  \"tools_used\": []\n}"
-      },
-      "id": "b6c1a001-0001-4000-8000-000000000011",
-      "name": "Structured Output Parser",
-      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
-      "typeVersion": 1.3,
-      "position": [
-        2140,
-        560
-      ]
-    },
-    {
-      "parameters": {
         "language": "javaScript",
-        "jsCode": "const intake = $('Normalize Request').first().json;\nconst supplier = $('Load Supplier').first().json;\nconst policy = $('Load Policy').first().json;\nfunction asText(value) {\n  if (value == null) return '';\n  if (typeof value === 'string') return value;\n  if (typeof value === 'number' || typeof value === 'boolean') return String(value);\n  return JSON.stringify(value);\n}\nfunction asList(value) {\n  if (value == null) return [];\n  if (Array.isArray(value)) return value.map(asText).filter(Boolean);\n  if (typeof value === 'string') return [value];\n  if (typeof value === 'object') return Object.entries(value).map(([key, item]) => key + ': ' + asText(item));\n  return [asText(value)];\n}\nfunction parseProposal(raw) {\n  let output = raw;\n  if (typeof output !== 'string') output = JSON.stringify(output);\n  const start = output.indexOf('{');\n  const end = output.lastIndexOf('}');\n  if (start < 0 || end <= start) return null;\n  const blob = output.slice(start, end + 1).replace(/,\\s*([}\\]])/g, '$1');\n  try { return JSON.parse(blob); } catch (error) { return null; }\n}\nlet proposal = parseProposal($json.output ?? $json.text ?? $json);\nif (!proposal) {\n  const current = Number(supplier.payment_terms);\n  const numbers = String(intake.request).match(/\\d+/g) || [];\n  const requested = numbers.map(Number).find((n) => n !== current) || current;\n  const delta = requested - current;\n  const policyText = (policy.results || []).map((item) => item.text).join(' ');\n  proposal = {\n    request_summary: supplier.id + ' asks to move payment terms from ' + current + ' to ' + requested + ' days.',\n    information_consulted: ['Supplier ' + supplier.id, 'payment terms policy'],\n    facts: [\n      'Current payment terms: ' + current + ' days.',\n      'Requested payment terms: ' + requested + ' days.',\n      'Change: ' + delta + ' days.',\n      policyText\n    ].filter(Boolean),\n    assumptions: ['The agent reply was not valid JSON, so this proposal was built from the loaded supplier record and policy.'],\n    analysis: delta > 15 ? 'The change is greater than 15 days, so Procurement Director approval is required.' : 'Procurement approval is required before any change.',\n    proposed_action: 'Record the proposal and wait for human approval. Do not change payment terms yet.',\n    expected_impact: 'No payment term is changed until a human approves.',\n    requires_human_approval: true,\n    clarification_needed: false,\n    tools_used: ['Load Supplier', 'Load Policy']\n  };\n}\nfor (const key of ['information_consulted', 'facts', 'assumptions', 'tools_used']) proposal[key] = asList(proposal[key]);\nfor (const key of ['request_summary', 'analysis', 'proposed_action', 'expected_impact']) {\n  if (proposal[key] != null && typeof proposal[key] !== 'string') proposal[key] = asText(proposal[key]);\n}\nif (typeof proposal.requires_human_approval !== 'boolean') proposal.requires_human_approval = true;\nif (typeof proposal.clarification_needed !== 'boolean') proposal.clarification_needed = false;\nreturn [{ json: { request_id: intake.request_id, requester: intake.requester, request: intake.request, proposal } }];"
+        "jsCode": "const intake = $('Normalize Request').first().json;\nconst supplier = $('Load Supplier').first().json;\nconst policy = $('Load Policy').first().json;\nfunction asText(value) {\n  if (value == null) return '';\n  if (typeof value === 'string') return value;\n  if (typeof value === 'number' || typeof value === 'boolean') return String(value);\n  return JSON.stringify(value);\n}\nfunction asList(value) {\n  if (value == null) return [];\n  if (Array.isArray(value)) return value.map(asText).filter(Boolean);\n  if (typeof value === 'string') return [value];\n  if (typeof value === 'object') return Object.entries(value).map(([key, item]) => key + ': ' + asText(item));\n  return [asText(value)];\n}\nfunction parseProposal(raw) {\n  let output = raw;\n  if (typeof output !== 'string') output = JSON.stringify(output);\n  const start = output.indexOf('{');\n  const end = output.lastIndexOf('}');\n  if (start < 0 || end <= start) return null;\n  const blob = output.slice(start, end + 1).replace(/,\\s*([}\\]])/g, '$1');\n  try { return JSON.parse(blob); } catch (error) { return null; }\n}\nlet proposal = parseProposal($json.output ?? $json.text ?? $json);\nif (!proposal) {\n  const current = Number(supplier.payment_terms);\n  const numbers = String(intake.request).match(/\\d+/g) || [];\n  const requested = numbers.map(Number).find((n) => n !== current) || current;\n  const delta = requested - current;\n  const policyText = (policy.results || []).map((item) => item.text).join(' ');\n  proposal = {\n    request_summary: supplier.id + ' asks to move payment terms from ' + current + ' to ' + requested + ' days.',\n    information_consulted: ['Supplier ' + supplier.id, 'payment terms policy'],\n    facts: [\n      'Current payment terms: ' + current + ' days.',\n      'Requested payment terms: ' + requested + ' days.',\n      'Change: ' + delta + ' days.',\n      policyText\n    ].filter(Boolean),\n    assumptions: ['The agent reply was not valid JSON, so this proposal was built from the loaded supplier record and policy.'],\n    analysis: delta > 15 ? 'The change is greater than 15 days, so Procurement Director approval is required.' : 'Procurement approval is required before any change.',\n    proposed_action: 'Record the proposal and wait for human approval. Do not change payment terms yet.',\n    expected_impact: 'No payment term is changed until a human approves.',\n    requires_human_approval: true,\n    clarification_needed: false,\n    tools_used: ['Load Supplier', 'Load Policy'],\n    fallback_used: true\n  };\n}\nfor (const key of ['information_consulted', 'facts', 'assumptions', 'tools_used']) proposal[key] = asList(proposal[key]);\nfor (const key of ['request_summary', 'analysis', 'proposed_action', 'expected_impact']) {\n  if (proposal[key] != null && typeof proposal[key] !== 'string') proposal[key] = asText(proposal[key]);\n}\nif (typeof proposal.requires_human_approval !== 'boolean') proposal.requires_human_approval = true;\nif (typeof proposal.clarification_needed !== 'boolean') proposal.clarification_needed = false;\nif (typeof proposal.fallback_used !== 'boolean') proposal.fallback_used = false;\nreturn [{ json: { request_id: intake.request_id, requester: intake.requester, request: intake.request, proposal } }];"
       },
       "id": "b6c1a001-0001-4000-8000-000000000012",
       "name": "Prepare Proposal",
@@ -308,7 +294,7 @@
     {
       "parameters": {
         "language": "javaScript",
-        "jsCode": "const prepared = $('Prepare Proposal').first().json;\nconst proposal = prepared.proposal;\nreturn [{ json: { request_id: prepared.request_id, status: 'Waiting Approval', request_summary: proposal.request_summary, information_consulted: proposal.information_consulted, facts: proposal.facts, assumptions: proposal.assumptions, analysis: proposal.analysis, proposed_action: proposal.proposed_action, expected_impact: proposal.expected_impact, tools_used: proposal.tools_used, approval_url: $execution.resumeUrl, how_to_approve: 'POST {\"decision\":\"approved\",\"approved_by\":\"your-name\"} to approval_url. Use decision rejected to stop without applying the action.', demonstration_data: true } }];"
+        "jsCode": "const prepared = $('Prepare Proposal').first().json;\nconst proposal = prepared.proposal;\nreturn [{ json: { request_id: prepared.request_id, status: 'Waiting Approval', request_summary: proposal.request_summary, information_consulted: proposal.information_consulted, facts: proposal.facts, assumptions: proposal.assumptions, analysis: proposal.analysis, proposed_action: proposal.proposed_action, expected_impact: proposal.expected_impact, tools_used: proposal.tools_used, approval_url: $execution.resumeUrl, how_to_approve: 'POST {\"decision\":\"approved\",\"approved_by\":\"your-name\"} to approval_url. Use decision rejected to stop without applying the action.', fallback_used: proposal.fallback_used === true, demonstration_data: true } }];"
       },
       "id": "b6c1a001-0001-4000-8000-000000000014",
       "name": "Build Webhook Response",
@@ -557,7 +543,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.OPSPILOT_API_URL + '/suppliers/' + ($('Normalize Request').first().json.request.toUpperCase().includes('NORDIC') ? 'NORDIC' : $('Normalize Request').first().json.request.toUpperCase().includes('HELIX') ? 'HELIX' : 'ACME') }}",
+        "url": "={{ $env.OPSPILOT_API_URL + '/suppliers/' + ($('Normalize Request').first().json.request.toUpperCase().includes('NORDIC') ? 'NORDIC' : $('Normalize Request').first().json.request.toUpperCase().includes('HELIX') ? 'HELIX' : $('Normalize Request').first().json.request.toUpperCase().includes('ACME') ? 'ACME' : 'UNKNOWN') }}",
         "sendHeaders": true,
         "specifyHeaders": "keypair",
         "headerParameters": {
@@ -586,7 +572,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "={{ $env.OPSPILOT_API_URL + '/knowledge/search?q=' + encodeURIComponent('payment terms') }}",
+        "url": "={{ $env.OPSPILOT_API_URL + '/knowledge/search?q=' + encodeURIComponent(/pay|paiement|jour|day|term/i.test($('Normalize Request').first().json.request) ? 'payment terms' : $('Normalize Request').first().json.request.slice(0, 80)) }}",
         "sendHeaders": true,
         "specifyHeaders": "keypair",
         "headerParameters": {
@@ -718,17 +704,6 @@
           {
             "node": "AI Agent",
             "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Structured Output Parser": {
-      "ai_outputParser": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_outputParser",
             "index": 0
           }
         ]

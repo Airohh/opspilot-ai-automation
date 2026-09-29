@@ -162,6 +162,8 @@ def test_approved_decision_updates_the_request(client: TestClient):
     kpi = client.get("/kpi").json()
     assert kpi["successful_executions"] == 1
     assert kpi["approval_rate"] == 1
+    assert body["fallback_used"] is False
+    assert kpi["fallback_used_count"] == 0
 
 
 def test_resolve_before_proposal_is_refused(client: TestClient):
@@ -268,3 +270,25 @@ def _propose(client: TestClient) -> str:
     assert proposal.status_code == 200
     assert proposal.json()["status"] == "Waiting Approval"
     return request_id
+
+
+def test_fallback_used_is_counted(client: TestClient):
+    created = client.post(
+        "/operations/intake",
+        json={"request": "ACME payment terms", "requester": "portfolio-user"},
+    )
+    request_id = created.json()["request_id"]
+    client.post("/notion/requests", json={"request_id": request_id})
+    proposal = client.post(
+        f"/operations/{request_id}/proposal",
+        json={
+            "request_summary": "Fallback proposal.",
+            "analysis": "The model reply was not valid JSON.",
+            "proposed_action": "Ask a human to review the loaded supplier record.",
+            "fallback_used": True,
+        },
+    )
+    assert proposal.status_code == 200
+    assert proposal.json()["fallback_used"] is True
+    kpi = client.get("/kpi").json()
+    assert kpi["fallback_used_count"] == 1

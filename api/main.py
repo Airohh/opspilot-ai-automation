@@ -90,6 +90,7 @@ class ProposalIn(BaseModel):
     requires_human_approval: bool = True
     clarification_needed: bool = False
     tools_used: list[str] = []
+    fallback_used: bool = False
 
 
 class ResolveIn(BaseModel):
@@ -322,6 +323,7 @@ def create_app(
         row.proposed_action = body.proposed_action or body.request_summary
         row.expected_impact = body.expected_impact
         row.tools_used = json.dumps(body.tools_used)
+        row.fallback_used = body.fallback_used
         row.status = "Waiting Approval"
         row.human_approval = "Pending"
         row.waiting_approval_at = utcnow()
@@ -429,9 +431,7 @@ def create_app(
     ) -> dict:
         row = _get_request(session, request_id)
         events = session.scalars(
-            select(AuditEvent)
-            .where(AuditEvent.request_id == request_id)
-            .order_by(AuditEvent.id)
+            select(AuditEvent).where(AuditEvent.request_id == request_id).order_by(AuditEvent.id)
         ).all()
         return {"request": row.to_dict(), "events": [event.to_dict() for event in events]}
 

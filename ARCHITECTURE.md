@@ -1,6 +1,6 @@
 # Architecture
 
-OpsPilot is a controlled operations agent. n8n decides the order of steps. The model decides which read tools to call. FastAPI applies the business writes, and only after the workflow has passed the human gate.
+OpsPilot is a controlled operations workflow. n8n decides the order of steps. The demo loads the supplier record and the policy, then the model writes the proposal. The read tools stay connected, and the model is told not to call them on this path, because an open tool loop used every iteration without returning a proposal. FastAPI applies the business writes, and only after the workflow has passed the human gate.
 
 ## What runs where
 
@@ -29,7 +29,7 @@ The prompt file is `prompts/opspilot_system.md`. The workflow loads it with `GET
 ## Why these three tools
 
 - Supplier API Tool calls `GET /suppliers/{id}`. That is the fictional supplier system.
-- Policy Tool calls `GET /knowledge/search`. It scores markdown paragraphs by keyword overlap.
+- Policy Tool calls `GET /knowledge/search`. It returns the matching policy files by keyword overlap. It is not a RAG pipeline.
 - Notion Read Tool calls `GET /notion/requests`. It returns id, title, status, and approval. It cannot write.
 
 Writes are ordinary HTTP nodes after the Wait node, not tools. The model never receives a write tool. That split is the control: the agent proposes, the workflow executes.

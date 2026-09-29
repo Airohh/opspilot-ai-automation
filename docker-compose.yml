@@ -30,7 +30,7 @@ services:
       - ./prompts:/app/prompts:ro
       - ./config:/app/config:ro
     ports:
-      - "8080:8000"
+      - "127.0.0.1:8080:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,7 +38,7 @@ services:
   n8n:
     image: n8nio/n8n:2.41.3
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     environment:
       GENERIC_TIMEZONE: Europe/Paris
       TZ: Europe/Paris

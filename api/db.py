@@ -5,7 +5,18 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, select
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    false,
+    inspect,
+    select,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -50,6 +61,9 @@ class OperationRequest(Base):
     proposed_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     expected_impact: Mapped[str | None] = mapped_column(Text, nullable=True)
     tools_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fallback_used: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     approved_by: Mapped[str | None] = mapped_column(String(200), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -68,6 +82,7 @@ class OperationRequest(Base):
             "proposed_action": self.proposed_action,
             "expected_impact": self.expected_impact,
             "tools_used": _load_tools(self.tools_used),
+            "fallback_used": bool(self.fallback_used),
             "approved_by": self.approved_by,
             "error_message": self.error_message,
         }
@@ -118,12 +133,31 @@ def make_engine(database_url: str):
 
 def init_db(engine) -> sessionmaker[Session]:
     Base.metadata.create_all(engine)
+    _ensure_fallback_column(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def _ensure_fallback_column(engine) -> None:
+    inspector = inspect(engine)
+    if "operation_requests" not in inspector.get_table_names():
+        return
+    names = {column["name"] for column in inspector.get_columns("operation_requests")}
+    if "fallback_used" in names:
+        return
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "ALTER TABLE operation_requests ADD COLUMN fallback_used BOOLEAN NOT NULL DEFAULT 0"
+            )
+        )
 
 
 def next_request_id(session: Session, now: datetime | None = None) -> str:
     moment = now or utcnow()
-    counter = session.get(RequestCounter, moment.year)
+    query = select(RequestCounter).where(RequestCounter.year == moment.year)
+    if session.get_bind().dialect.name != "sqlite":
+        query = query.with_for_update()
+    counter = session.scalars(query).one_or_none()
     if counter is None:
         counter = RequestCounter(year=moment.year, last_value=1)
         session.add(counter)
@@ -178,6 +212,7 @@ def build_kpi(
     rows = list(session.scalars(select(OperationRequest)).all())
     processed = len(rows)
     successful = sum(1 for row in rows if row.status == "Completed")
+    fallback_used = sum(1 for row in rows if row.fallback_used)
     failed = sum(1 for row in rows if row.status == "Failed")
     approved = sum(1 for row in rows if row.human_approval == "Approved")
     rejected = sum(1 for row in rows if row.human_approval == "Rejected")
@@ -199,6 +234,7 @@ def build_kpi(
         "source": "audit_log",
         "requests_processed": processed,
         "successful_executions": successful,
+        "fallback_used_count": fallback_used,
         "failed_executions": failed,
         "approval_rate": None if decided == 0 else round(approved / decided, 4),
         "rejection_rate": None if decided == 0 else round(rejected / decided, 4),

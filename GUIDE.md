@@ -1,12 +1,12 @@
 # OpsPilot — guide complet
 
-Ce fichier est pour toi. Il dit ce qui marche ce soir, ce qui ne marche pas encore, et comment raconter le projet. Les docs en anglais (`README.md`, `ARCHITECTURE.md`, `SECURITY.md`, `docs/roi.md`) sont la version à montrer. Celle-ci est la version à comprendre.
+Ce fichier est pour toi. Il dit ce qui a été vérifié, et comment raconter le projet. Les docs en anglais (`README.md`, `ARCHITECTURE.md`, `SECURITY.md`, `docs/roi.md`) sont la version à montrer.
 
 ## Est-ce que tout marche ?
 
-Non. Le code et les tests marchent. La démo de bout en bout ne marche pas encore, parce qu’il manque Notion, une clé de modèle, et le lancement Docker complet.
+La démo locale a été faite le 29 septembre 2026. **REQ-2026-008** est passé de bout en bout : webhook de test, proposition du modèle, POST d’approbation dans PowerShell, statut Completed, page Notion mise à jour. Docker Compose n’a pas été lancé. Le n8n utilisé est le conteneur déjà ouvert sur le port 5678.
 
-Vérifié le 28 septembre 2026 sur cette machine :
+Vérifié le 29 septembre 2026 sur cette machine :
 
 | Élément | Résultat |
 | --- | --- |
@@ -14,21 +14,21 @@ Vérifié le 28 septembre 2026 sur cette machine :
 | Compte n8n | L’ancien propriétaire a été effacé. Au premier écran tu crées un compte local. Ce n’est pas un compte n8n.io. |
 | Tests Python | 17 tests passés. |
 | API FastAPI sur http://127.0.0.1:8080 | Démarrée pour la vérification. Santé OK. ACME trouvé. Fournisseur inconnu = 404. Politique « payment terms » trouvée. ROI et KPI répondent. |
-| Notion | Pas configuré. L’appel `/notion/requests` renvoie 503. C’est le comportement voulu. |
-| Fichier `.env` | Absent. Les secrets ne sont pas dans git. |
-| Workflow n8n importé | Non. Le fichier existe : `n8n/opspilot-workflow.json`. Il n’est pas encore dans l’éditeur. |
-| Docker Compose (n8n + API + Postgres ensemble) | Pas lancé. Le n8n actuel est un conteneur séparé, lancé seulement pour avoir l’éditeur. |
-| Agent LLM qui analyse ACME | Pas exécuté. Il faut une clé dans l’écran de credential n8n. |
+| Notion | Configuré. Base **AI Automation Lab** seulement. |
+| Fichier `.env` | Présent en local, ignoré par git. |
+| Workflow n8n importé | Oui, dans l’éditeur local. |
+| Docker Compose (n8n + API + Postgres ensemble) | Pas lancé. Le n8n actuel est un conteneur séparé. |
+| Agent LLM qui analyse ACME | Exécuté. REQ-2026-008 a produit une proposition. Si le JSON du modèle est invalide, le nœud Prepare Proposal construit une proposition de secours et met `fallback_used` à true. |
 
-L’API lancée pour ce contrôle n’est pas celle de Docker. Elle utilise une base SQLite locale et l’authentification est désactivée, parce que `.env` n’existe pas. Notion est volontairement éteint tant que tu n’as pas mis de token.
+L’API locale utilise SQLite, charge `.env`, et Notion est configuré. Ce n’est pas le stack Docker Compose.
 
 Le port **8000 est inutilisable sur ce PC**. Windows réserve la plage 7902–8001. Docker ne pourrait pas publier l’API dessus. Le port public est donc **8080**. À l’intérieur du réseau Docker, l’API reste sur le port 8000, et n8n l’appelle par `http://api:8000`. Depuis ton navigateur ou `curl`, tu utilises `http://localhost:8080`.
 
 ## La phrase à dire
 
-I built an AI automation workflow where n8n acts as the orchestration layer, an LLM agent decides when to use authorized tools, Notion acts as the business system, FastAPI exposes business data through an API, sensitive actions require human approval, and every execution is logged and measurable.
+I built an AI automation workflow where n8n orchestrates the steps, the model writes a proposal from the supplier record and the policy loaded before it, Notion stores the request, FastAPI exposes the business data, a human must approve before the Notion page is completed, and every execution is logged. The read tools are connected, and this demo does not let the model call them, because that loop never returned a proposal.
 
-En français : n8n conduit le parcours. Le modèle choisit quels outils lire. Notion est le dossier métier. FastAPI porte les données, l’écriture Notion, l’audit et le calcul de ROI. Une action sensible ne part qu’après un humain. Chaque exécution laisse une trace.
+En français : n8n conduit le parcours. Le modèle rédige la proposition à partir de la fiche et de la politique déjà chargées. Notion est le dossier métier. FastAPI porte les données, l’écriture Notion, l’audit et le calcul de ROI. Une action sensible ne part qu’après un humain. Chaque exécution laisse une trace.
 
 ## Le cas d’usage
 
@@ -150,13 +150,14 @@ Dans PowerShell, utilise `curl.exe`. `curl` seul est un alias qui ne fait pas la
 - Que le ROI de 188 est un résultat réel.
 - Que Syro, MCP, Slack ou un RAG sont dans le workflow.
 - Que les fournisseurs ACME, Nordic Steel et Helix Logistics existent.
-- Que Notion a été modifié : aucune page personnelle n’a été touchée. La base n’a pas encore été créée.
-- Que l’agent a déjà tourné sur une vraie demande : le modèle n’a pas été appelé.
+- Que des pages Notion personnelles ont été modifiées. Seule la base AI Automation Lab l’a été.
+- Que l’agent choisit lui-même ses outils sur cette démo. Les fiches sont chargées avant lui.
+- Qu’une proposition sans `fallback_used: true` a forcément été écrite par le modèle. Si ce champ est true, le plan B a servi.
 
 ## Limites à assumer en entretien
 
 - L’écran d’approbation est l’URL du node Wait, pas une interface produit.
 - L’action exécutée met à jour Notion. Elle ne parle pas à un ERP.
-- Deux demandes envoyées en même temps peuvent se marcher sur le compteur `REQ-YYYY-NNN`. Il n’y a pas de verrou.
+- Deux demandes envoyées en même temps sur SQLite peuvent encore se marcher sur le compteur `REQ-YYYY-NNN`. Postgres prend un verrou `FOR UPDATE`.
 - Les appels au modèle ne sont pas retentés, pour ne pas payer trois fois la même panne. Les appels HTTP et Notion sont retentés au plus trois fois.
 - Si Notion tombe après le choix humain, le statut local devient `Failed` et l’API répond 502. Elle ne répond pas `Completed`.
